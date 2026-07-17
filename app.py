@@ -14,7 +14,7 @@ Environment variables:
 import os
 import logging
 from flask import Flask, request, jsonify
-from url_shortener_sqlite import URLShortener
+from url_shortener import URLShortener
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
