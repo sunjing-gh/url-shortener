@@ -1,0 +1,79 @@
+### URL Shortener API - Testing with REST Client Extension
+
+@baseUrl = http://localhost:8080
+@contentType = application/json
+
+### 1. Health Check
+GET {{baseUrl}}/health
+
+### 2. Create Short URL with Auto-Generated Code
+POST {{baseUrl}}/api/shorten
+Content-Type: {{contentType}}
+
+{
+  "original_url": "https://github.com/anthropics/anthropic-sdk-python"
+}
+
+### 3. Create Short URL with Custom Code
+POST {{baseUrl}}/api/shorten
+Content-Type: {{contentType}}
+
+{
+  "original_url": "https://www.python.org",
+  "custom_short_code": "py"
+}
+
+### 4. Create Another Custom Code
+POST {{baseUrl}}/api/shorten
+Content-Type: {{contentType}}
+
+{
+  "original_url": "https://github.com",
+  "custom_short_code": "gh"
+}
+
+### 5. Lookup a Short Code
+GET {{baseUrl}}/api/lookup/py
+
+### 6. Lookup Non-Existent Code (Should Return 404)
+GET {{baseUrl}}/api/lookup/notexist
+
+### 7. List All URLs
+GET {{baseUrl}}/api/all
+
+### 8. Update a Short Code
+PUT {{baseUrl}}/api/update/py
+Content-Type: {{contentType}}
+
+{
+  "original_url": "https://python.org/docs"
+}
+
+### 9. Verify Update
+GET {{baseUrl}}/api/lookup/py
+
+### 10. Delete a Short Code
+DELETE {{baseUrl}}/api/delete/gh
+
+### 11. Verify Deletion (Should Return 404)
+GET {{baseUrl}}/api/lookup/gh
+
+### 12. List All Remaining URLs
+GET {{baseUrl}}/api/all
+
+### 13. Error Test - Missing Required Field
+POST {{baseUrl}}/api/shorten
+Content-Type: {{contentType}}
+
+{
+  "original_url": ""
+}
+
+### 14. Error Test - Duplicate Short Code
+POST {{baseUrl}}/api/shorten
+Content-Type: {{contentType}}
+
+{
+  "original_url": "https://example.com",
+  "custom_short_code": "py"
+}
