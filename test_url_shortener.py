@@ -260,3 +260,30 @@ class URLShortener:
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM urls")
             return cursor.fetchone()[0]
+        
+# --- Put this at the very bottom of test.py ---
+if __name__ == "__main__":
+    print("--- Starting URL Shortener Test ---")
+    
+    # 1. Initialize the shortener in debug mode to see database logs
+    shortener = URLShortener(db_path="test_urls.db", debug=True)
+    
+    # 2. Test creating a short link
+    try:
+        my_code = shortener.create("https://google.com")
+        print(f"Success! Generated code: {my_code}")
+        
+        # 3. Test reading it back
+        original = shortener.read(my_code)
+        print(f"Retrieved original URL: {original}")
+        
+        # 4. Check how many items are in the DB
+        print(f"Total links stored: {len(shortener)}")
+        
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        
+    finally:
+        # Cleanup the test database file afterwards if you want
+        if os.path.exists("test_urls.db"):
+            os.remove("test_urls.db")
