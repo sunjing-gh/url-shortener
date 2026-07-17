@@ -1,32 +1,49 @@
 """
-Flask REST API for URL Shortener.
+Production-ready Flask REST API for URL Shortener with SQLite backend.
 
-Endpoints:
-  POST   /api/shorten           - Create a short URL
-  GET    /api/lookup/<code>     - Retrieve original URL
-  PUT    /api/update/<code>     - Update a short URL
-  DELETE /api/delete/<code>     - Delete a short URL
-  GET    /api/all               - List all mappings
-  GET    /health                - Health check
+Configuration via environment variables (.env file).
 
-Run with: python3 app.py
-Then test with curl or access http://localhost:5000 in browser.
+Run with: python3 app_sqlite.py
+
+Environment variables:
+  FLASK_PORT: Port to run on (default: 8080)
+  DATABASE_PATH: Path to SQLite database (default: urls.db)
+  FLASK_DEBUG: Enable debug mode (default: False)
 """
 
-from flask import Flask, request, jsonify
-from url_shortener import URLShortener
+import os
 import logging
+from flask import Flask, request, jsonify
+from url_shortener_sqlite import URLShortener
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Initialize Flask app
 app = Flask(__name__)
 app.config['JSON_SORT_KEYS'] = False
 
-# Initialize URL shortener
-shortener = URLShortener()
+# Configuration from environment variables
+DATABASE_PATH = os.getenv('DATABASE_PATH', 'urls.db')
+FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
+FLASK_HOST = os.getenv('FLASK_HOST', '127.0.0.1')
+FLASK_PORT = int(os.getenv('FLASK_PORT', 8080))
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+
+# Initialize URL shortener with SQLite backend
+shortener = URLShortener(db_path=DATABASE_PATH, debug=FLASK_DEBUG)
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
+logger.info(f"Starting Flask API with SQLite backend")
+logger.info(f"Database: {DATABASE_PATH}")
+logger.info(f"Debug mode: {FLASK_DEBUG}")
 
 
 # ============================================================================
@@ -56,18 +73,26 @@ def error_response(message, status_code=400):
 @app.route('/health', methods=['GET'])
 def health_check():
     """
-    Health check endpoint. Always returns 200 OK.
+    Health check endpoint.
     
     Response:
         {
             "status": "ok",
-            "total_urls": <count>
+            "database": "SQLite",
+            "total_urls": 5
         }
     """
-    return jsonify({
-        "status": "ok",
-        "total_urls": len(shortener)
-    }), 200
+    try:
+        total_urls = len(shortener)
+        return jsonify({
+            "status": "ok",
+            "database": "SQLite",
+            "total_urls": total_urls,
+            "database_path": DATABASE_PATH
+        }), 200
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return error_response("Database connection failed", 500)
 
 
 @app.route('/api/shorten', methods=['POST'])
@@ -99,7 +124,7 @@ def shorten():
 
     try:
         short_code = shortener.create(original_url, custom_short_code)
-        logger.info(f"Created: {short_code} -> {original_url}")
+        logger.info(f"API: Created short URL {short_code}")
         
         return success_response({
             "short_code": short_code,
@@ -107,7 +132,7 @@ def shorten():
         }, 201)
     
     except ValueError as e:
-        logger.warning(f"Validation error in shorten: {e}")
+        logger.warning(f"Validation error: {e}")
         return error_response(str(e), 400)
     except Exception as e:
         logger.error(f"Unexpected error in shorten: {e}")
@@ -120,21 +145,16 @@ def lookup(short_code):
     Retrieve the original URL for a short code.
     
     Path parameter:
-        short_code: The short code to look up (e.g., "/api/lookup/ex")
+        short_code: The short code to look up
     
     Response (200 OK):
         {
             "success": true,
             "data": {
                 "short_code": "ex",
-                "original_url": "https://example.com/very/long/path"
+                "original_url": "https://example.com/very/long/path",
+                "lookup_count": 3
             }
-        }
-    
-    Response (404 Not Found):
-        {
-            "success": false,
-            "error": "Short code 'xyz' not found"
         }
     """
     if not short_code:
@@ -143,13 +163,17 @@ def lookup(short_code):
     original_url = shortener.read(short_code)
     
     if original_url is None:
-        logger.info(f"Lookup failed: {short_code} not found")
+        logger.info(f"API: Lookup failed for {short_code}")
         return error_response(f"Short code '{short_code}' not found", 404)
     
-    logger.info(f"Lookup: {short_code} -> {original_url}")
+    # Get stats
+    stats = shortener.get_stats(short_code)
+    
+    logger.info(f"API: Lookup success for {short_code}")
     return success_response({
         "short_code": short_code,
-        "original_url": original_url
+        "original_url": original_url,
+        "lookup_count": stats['lookup_count'] if stats else 0
     }, 200)
 
 
@@ -159,7 +183,7 @@ def update(short_code):
     Update the original URL for an existing short code.
     
     Path parameter:
-        short_code: The short code to update (e.g., "/api/update/ex")
+        short_code: The short code to update
     
     Request body:
         {
@@ -186,7 +210,7 @@ def update(short_code):
 
     try:
         shortener.update(short_code, new_url)
-        logger.info(f"Updated: {short_code} -> {new_url}")
+        logger.info(f"API: Updated {short_code}")
         
         return success_response({
             "short_code": short_code,
@@ -194,7 +218,7 @@ def update(short_code):
         }, 200)
     
     except ValueError as e:
-        logger.warning(f"Validation error in update: {e}")
+        logger.warning(f"Validation error: {e}")
         return error_response(str(e), 404)
     except Exception as e:
         logger.error(f"Unexpected error in update: {e}")
@@ -207,7 +231,7 @@ def delete(short_code):
     Delete a short code mapping.
     
     Path parameter:
-        short_code: The short code to delete (e.g., "/api/delete/ex")
+        short_code: The short code to delete
     
     Response (200 OK):
         {
@@ -222,14 +246,14 @@ def delete(short_code):
 
     try:
         shortener.delete(short_code)
-        logger.info(f"Deleted: {short_code}")
+        logger.info(f"API: Deleted {short_code}")
         
         return success_response({
             "message": f"Short code '{short_code}' deleted"
         }, 200)
     
     except ValueError as e:
-        logger.warning(f"Validation error in delete: {e}")
+        logger.warning(f"Validation error: {e}")
         return error_response(str(e), 404)
     except Exception as e:
         logger.error(f"Unexpected error in delete: {e}")
@@ -239,7 +263,7 @@ def delete(short_code):
 @app.route('/api/all', methods=['GET'])
 def list_all():
     """
-    Retrieve all short code mappings.
+    Retrieve all short code mappings with usage statistics.
     
     Response (200 OK):
         {
@@ -247,19 +271,35 @@ def list_all():
             "data": {
                 "count": 3,
                 "urls": {
-                    "ex": "https://example.com",
-                    "py": "https://python.org",
-                    "gh": "https://github.com"
+                    "ex": {
+                        "original_url": "https://example.com",
+                        "lookup_count": 5
+                    },
+                    ...
                 }
             }
         }
     """
-    all_urls = shortener.list_all()
-    
-    return success_response({
-        "count": len(all_urls),
-        "urls": all_urls
-    }, 200)
+    try:
+        all_urls = shortener.list_all()
+        
+        # Enrich with stats
+        urls_with_stats = {}
+        for code, url in all_urls.items():
+            stats = shortener.get_stats(code)
+            urls_with_stats[code] = {
+                "original_url": url,
+                "lookup_count": stats['lookup_count'] if stats else 0,
+                "created_at": stats['created_at'] if stats else None
+            }
+        
+        return success_response({
+            "count": len(all_urls),
+            "urls": urls_with_stats
+        }, 200)
+    except Exception as e:
+        logger.error(f"Error listing URLs: {e}")
+        return error_response("Internal server error", 500)
 
 
 # ============================================================================
@@ -290,11 +330,17 @@ def internal_error(e):
 # ============================================================================
 
 if __name__ == '__main__':
-    print("""
+    print(f"""
     ╔══════════════════════════════════════════════════════════════╗
-    ║  URL SHORTENER - Flask REST API                            ║
+    ║  URL SHORTENER - Flask REST API (SQLite Backend)            ║
     ║                                                              ║
-    ║  Starting server at http://localhost:8080                   ║
+    ║  Configuration:                                              ║
+    ║    Host: {FLASK_HOST}                                       ║
+    ║    Port: {FLASK_PORT}                                          ║
+    ║    Database: {DATABASE_PATH}                                  ║
+    ║    Debug: {FLASK_DEBUG}                                       ║
+    ║                                                              ║
+    ║  Starting server at http://{FLASK_HOST}:{FLASK_PORT}                     ║
     ║                                                              ║
     ║  Endpoints:                                                  ║
     ║    POST   /api/shorten         - Create short URL           ║
@@ -307,4 +353,5 @@ if __name__ == '__main__':
     ║  Press CTRL+C to stop                                        ║
     ╚══════════════════════════════════════════════════════════════╝
     """)
-    app.run(debug=True, host='127.0.0.1', port=8080)
+    
+    app.run(debug=FLASK_DEBUG, host=FLASK_HOST, port=FLASK_PORT)
